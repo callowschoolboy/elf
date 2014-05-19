@@ -1,7 +1,24 @@
 
-*        fcst_arch= ~do 48 ~from %20 ~to %0 ~by %5 and it converts!  and takes date9. alternatively or another alt is tell it to look at an existing Role variable which
-   ot cpmverts to numeric (all convert to numeric numbers of observations);
-
+/************************************************************************************************************************************************************************
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+*
+*
+*                  Hutzel Forecasting Code Library
+*
+*       NAME: temp_glm_slicer.sas
+* Author:     Andrew J. Hutzel
+* Subject:    PERIOD-ahead GLM Hong's model for ELF
+* Byline:     Dynamic Regression generalized to several forecasts in series 
+* Sections:   
+*
+*  
+*      NOTES: A long planned generalization of production_glarima.sas in
+*              which one can kick off an arbitrary number of iterations of
+*              that forecasting system (e.g. 200 day-aheads) which eases 
+*              and speeds up system diagnosis. 
+*
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+*************************************************************************************************************************************************************************/
 
 
 %macro NullSymbol(sym);
@@ -44,12 +61,19 @@
 /******************************  This slicing logic assumes full data, so that future values of covariate   ******************************/
 /******************************   (whether forecasted or actual) are available 48 obs ahead, gives accuracy ******************************/
 /*****************************************************************************************************************************************/
+*count observations in the input dataset;
 proc sql; 
 select count(*) 
  into : inputnumobs 
  from gef_MI; 
 quit;
+*The macro variable iter is the number of 48-hour periods to run ex ante DynReg for;
 %let iter=3;
+*Currently the architecture dataset specifies essentially only the "ForecastWindow" which is the number
+ of observations in each run of the system (e.g. 48 for day-ahead ELF) and the number of times to do so
+ (e.g. 48 by 3 will go back a total of 144 observations and give 3 sets of 48-obs forecasts, with accuracy and graphs)
+ Currently it is assumed that no overlap or chunking is done, and that in the end all data will get used (i.e. the last run
+ will get the last data point).  Other forms of input are planned but not yet implemented.;
 data architect;
 ForecastWindow=48;
 From=&inputnumobs- (48 * &iter.);
@@ -74,8 +98,8 @@ options mprint mlogic NOsymbolgen source notes;
 *Catch ForecastWindow, ForecastStart, ForecastEnd from the dataset supplied as ForecastArchitecture;
 data _null_;
 set &ForecastArchitecture.;
-*Currently always taken for granted ForecastWindow is a numeric number of observations;
-call symputx("ForecastWindow", ForecastWindow,"g");  *this same simplistic approach is taken to all 3 at first;
+*Currently assumed ForecastWindow, ForecastStart and ForecastEnd are numeric numbers of observations;
+call symputx("ForecastWindow", ForecastWindow,"g"); 
 call symputx("ForecastStart",  From,"g");
 call symputx("ForecastEnd",    To,"g");
 call symputx("Iterations",     Iterations,"g");
