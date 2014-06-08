@@ -130,288 +130,353 @@ FUTURE will specify model structure, now hardcoded one model "size" i.e. 2 lags 
 /*****************************************************************************************************************************************/
 
 options mprint mlogic symbolgen source notes;
-
 %macro module1_build(       InputDataset           =, 
 							ForecastSeries         =,
 							DateVariable           =,
-							ForecastStartDatetime  =notapplicabletomod1,
-							ForecastEndDatetime    =andmayneverbeusedremove,
 							PredictedTemperature   =,
 							HistoricalObservations =,
 							ProblemSpeed           =3600,
-							RoleVariable           =role,
+							ForecastArchitecture   =,
 
                             /* hidden for dev */
                             h=HOURofDay, d=DAYofWeek, m=MONTHofYear);
 
+/*PARSE THE FORECAST ARCHITECTURE*/ 
+*Catch ForecastWindow, ForecastStart, ForecastEnd from the dataset supplied as ForecastArchitecture;
+data _null_;
+set &ForecastArchitecture.;
+*Currently assumed ForecastWindow, ForecastStart and ForecastEnd are numeric numbers of observations;
+call symputx("ForecastWindow", ForecastWindow,"g"); 
+call symputx("ForecastStart",  From,"g");
+call symputx("ForecastEnd",    To,"g");
+call symputx("Iterations",     Iterations,"g");
+run;
+%put ForecastWindow=&ForecastWindow;
+%put ForecastStart=&ForecastStart;
+%put ForecastEnd=&ForecastEnd;
+%put Iterations=&Iterations;
+
+*Interpret ForecastStart (if already numeric - Number of Obs, % indicator - convert from percentage, quote D found - a date, ~over -  );
+*Interpret ForecastEnd (if already numeric - Number of Obs, % indicator - convert from percentage, quote D found - a date, ~over -  );
+
+
+*catch &RoleVariable;
+%local RoleVariable;
+*let RoleVariable=role;
 
 /*MACRO HOUSEKEEPING*/
-%local indata; 
-title;
-
-/* ROBUSTNESS */
-/* trace back what is the first missing value in any series, compare to ForecastStartDatetime
-   other more simple checks, start<end, etc */
-
-/* check that full data provided (no missing values at all, see error message */
-/*proc means data=&InputDataset noprint; output out=MeansOfInput; run;*/
-/*proc transpose data=MeansOfInput(where=(_STAT_="N")) out=b;*/
-/*var _numeric_;  *by process_grp_id;  run;*/
-/*proc sql noprint; select min(COL1), max(COL1) into : LeastNonmissingNumeric, : TotalObservations from b where _NAME_^="_TYPE_" ; quit;*/
-/**if &LeastNonmissingNumeric<&TotalObservations then *do;*/
-/*	*put ERROR: a missing value exists in a NUMERICAL variable in the dataset &InputDataset.  Module one requires full */
-/*                 data (although as of 10Nov2013 (week 8) VoI can be miss after first cut point).;*/
-/**end;*/
-
-/* check that macro variables are not null (0 characters) */
-*if NullSymbol(InputDataset) *or NullSymbol(ForecastSeries) *or NullSymbol(DateVariable) *or NullSymbol(PredictedTemperature) 
-        *or NullSymbol() *or NullSymbol() *or NullSymbol() *then *do;
- * Goto EXIT;
-
-
-
-
-%let indata=atemprenameofindat;
-data &indata;
-	set &InputDataset(
-                      /* where=(&RoleVariable="train") */
-                      rename=(&PredictedTemperature=T1_0 &DateVariable=datetime &ForecastSeries=L_0 &RoleVariable=role) );	
-    T2_0=T1_0**2;
-	T3_0=T1_0**3;
-	T1_1=lag(T1_0);
-	T2_1=T1_1**2;
-	T3_1=T1_1**3;
-	L_1=lag(L_0);
-	L_2=lag(L_1);
-	temp_diff=dif(T1_0);
-run;
-
-*knock back 48 obs;
-proc sql; 
-select count(*) 
- into : inputnumobs 
- from &indata; 
-quit;
-%let train1_limit_Nminus48=%eval(&inputnumobs-48);
-%put train1_limit_Nminus48=&train1_limit_Nminus48;
-
-*forking train/hold, train1 will become the main working dataset;
-data train1 hold1; 
-set &indata; 
-if _n_ <= &train1_limit_Nminus48 then output train1; 
-else output hold1; 
-run;
-
-
-*CHECK FOR INFORMATION LEAKS 
-1. when append should mean next iter gets predictions as inputs 
-2.at beginning have to RECALC LAGS on the working copy so that pred-as-ins occurs (TU SEEMS TO HAVE DONE THIS)
-can always rewrite this for contrived no-leak possible case then reintegrate that code.  But have checked, confident no info leaks here; 
-
-
-%do i= 1 %to 48 %by 1; 
-
-
-	*Use a macro variable to point to the obsnum that is the next in line to be forecasted;
-    **In a multilag GLM this is the start of the "ex ante gray period longjump"; 
-	%let iteration_obs=%eval(&train1_limit_Nminus48 + &i); 
-	%put iteration_obs=&iteration_obs;
-
-
-	data hold2_single;
-		set &indata;
-		if _n_=&iteration_obs then output;
-	run;
-
-
-	**IMPORTANT: we have to recalculate the lagged load (L_1) with the predicted value; 
-	**For the first iteration of the loop, it is simply the ACTUAL value of the last obs, but for other iterations,
-				  it is the FORECASTED value of the previous observation;
-	DATA getastep_prediction;
-		SET train1(IN=__ORIG) hold2_single;
-		__FLAG=__ORIG; * you do need this to pass info downstream;
-		*recalc lags or they will be stale i.e. info leaks;
-		L_1=lag(L_0);
-		L_2=lag(L_1);
-		*blank  out VoI for that last set ob;
-		if not __FLAG then L_0=.;
-	RUN;
-
-
-	*model and output the predictions; 
-	PROC GLM DATA=getastep_prediction
-			PLOTS=NONE NOPRINT 
-		;
-		CLASS &d. &h. &m.;
-		MODEL L_0 =
-		/* Main Effects:  */ 
-					trend 
-					&m.
-					L_1
-/*					L_2*/
-					T1_0 
-		/* 2-way Interactions: */
-					&d.*&h.
-				/* Temperature x hour */
-					T1_0*&h.
-					T2_0*&h. 
-					T3_0*&h. 
-					T1_1*&h. 
-					T2_1*&h. 
-					T3_1*&h. 
-				/* Temperature x month */
-					T1_0*&m.
-					T2_0*&m. 
-					T3_0*&m. 
-					T1_1*&m. 
-					T2_1*&m.	 
-					T3_1*&m. 
-				/* Load interactions: */
-				    L_1*&h. 
-					L_1*&m. 
-
-/*				    L_2*&h. */
-
-
-		;
-		RUN;
-
-		OUTPUT OUT= predict1_onestepiter (WHERE=(NOT __FLAG))
-			PREDICTED=predicted_Load ;
-		RUN;
-	QUIT;
-
-	data predict1_onestepiter; * in place, shift that variable predicted_Load over to the target &ForecastSeries.;
-	set predict1_onestepiter;
-	L_0 = predicted_Load;
-	drop predicted_Load __FLAG;
-	run; 
-
-	*train1 is the working DS, append to there (closed loop) i.e. look there for predicteds theyll be obs > amper train1_limit_Nminus48; 
-	%put APPENDINGggggggggggg; 
-	proc append base=train1 data=predict1_onestepiter; run; quit;
-
-
-%end;
-
-data train3;
-set train1;
-if _n_ > &train1_limit_Nminus48 then output;
-run;
-
-*getting accuracy measures, namely RMSE, with SQL;
-proc sql;
-               create table working_holdact as
-			    select actual.*, forec.L_0 as predicted_Load label="Predicted Forecasts of &ForecastSeries."
-				  from hold1 as actual, train3 as forec
-				   where actual.datetime=forec.datetime  
-		;
-  select sqrt(avg(se)) as rmse, sqrt(avg(sa)) as rmsa, avg(abs(L_0-predicted_Load)/L_0) as mape, (calculated rmse)/(calculated rmsa) as prmse_a
-   from 
-	  (  select *, (L_0-predicted_Load)**2 as se, (L_0)**2 as sa
-		  from working_holdact
-	   )
-  ;
-quit;
-
-*  GRAPHS ;
-*all hist+forec;
-title "Forecast Horizon, Actuals v. Forecasts, Also temperature.";
-proc sgplot data=working_holdact;
-series x=datetime y=L_0       / lineattrs=(thickness=1);
-series x=datetime y=predicted_Load         / lineattrs=(thickness=1);
-series x=datetime y=T1_0 / lineattrs=(thickness=1 color=yellow) y2axis;
-run; quit;
 title;
 
 
+%do IterationLoop=&Iterations. %to 1 %by -1;
 
+			%local indata;   *it may be possible to do this outside the loop but each iteration does need this idea done....;
+			%let indata=atemprenameofindat;
+			data &indata;
+				set &InputDataset(rename=(&PredictedTemperature=T1_0 &DateVariable=datetime &ForecastSeries=L_0 /*&RoleVariable=role*/) );	
+			    T2_0=T1_0**2;
+				T3_0=T1_0**3;
+				T1_1=lag(T1_0);
+				T2_1=T1_1**2;
+				T3_1=T1_1**3;
+				L_1=lag(L_0);
+				L_2=lag(L_1);
+				temp_diff=dif(T1_0);
+			run;
+
+			proc sql; 
+			select count(*) 
+			 into : inputnumobs 
+			 from &indata; 
+			quit;
+
+
+			*knock back 48 obs;
+			%let train2_limit_Nminus48=%eval(&inputnumobs - (&IterationLoop * &ForecastWindow.));
+			%put train2_limit_Nminus48=&train2_limit_Nminus48;
+
+			*forking train/hold, train2 will become the main working dataset;
+			data train2 hold1; 
+			set &indata; 
+			if _n_ <= &train2_limit_Nminus48 then output train2; 
+			else output hold1; 
+			run;
+
+
+			*CHECK FOR INFORMATION LEAKS 
+			1. when append should mean next iter gets predictions as inputs 
+			2.at beginning have to RECALC LAGS on the working copy so that pred-as-ins occurs (TU SEEMS TO HAVE DONE THIS)
+			can always rewrite this for contrived no-leak possible case then reintegrate that code.  But have checked, confident no info leaks here
+
+			3. THERE **IS** AN INFO LEAK FOR TEMPERATURE SINCE NO FOREC OF IT IS TAKEN FROM PROC ARIMA;
+
+			%do i= 1 %to &ForecastWindow. %by 1; 
+
+
+					*Use a macro variable to point to the obsnum that is the next in line to be forecasted;
+				    **In a multilag GLM this is the start of the "ex ante gray period longjump"; 
+					%let iteration_obs=%eval(&train2_limit_Nminus48 + &i); 
+					%put iteration_obs=&iteration_obs;
+
+
+					data hold2_single;
+						set &indata;
+						if _n_=&iteration_obs then output;
+					run;
+
+
+					**IMPORTANT: we have to recalculate the lags of load (L_1 etc, ex. L_20) with their predicted values; 
+					**For the first few iterations of the loop, it is simply ACTUAL values of the last obs, but for later iterations,
+								  it will be the FORECASTED value of the previous observation;
+					DATA getastep_prediction;
+						SET train2(IN=__ORIG) hold2_single;
+						__FLAG=__ORIG; * you do need this to pass info downstream;
+						*recalc lags or they will be stale i.e. info leaks;
+						L_1=lag(L_0);
+						L_2=lag(L_1);
+						*blank  out VoI for that last set ob;
+						if not __FLAG then L_0=.;
+					RUN;
+
+
+					*model and output the predictions; 
+					PROC GLM DATA=getastep_prediction
+							PLOTS=NONE NOPRINT 
+						;
+						CLASS &d. &h. &m.;
+						MODEL L_0 =
+						/* Main Effects:  */ 
+									trend 
+									&m.
+									L_1
+				/*					L_2*/
+									T1_0 
+						/* 2-way Interactions: */
+									&d.*&h.
+								/* Temperature x hour */
+									T1_0*&h.
+									T2_0*&h. 
+									T3_0*&h. 
+									T1_1*&h. 
+									T2_1*&h. 
+									T3_1*&h. 
+								/* Temperature x month */
+									T1_0*&m.
+									T2_0*&m. 
+									T3_0*&m. 
+									T1_1*&m. 
+									T2_1*&m.	 
+									T3_1*&m. 
+								/* Load interactions: */
+								    L_1*&h. 
+									L_1*&m. 
+
+				/*				    L_2*&h. */
+
+
+						;
+						RUN;
+
+						OUTPUT OUT= predict1_onestepiter (WHERE=(NOT __FLAG))
+							PREDICTED=predicted_Load ;
+						RUN;
+					QUIT;
+
+					data predict1_onestepiter; * in place, shift that variable predicted_Load over to the target &ForecastSeries. (its all in the names, at this point in the flow L_0);
+					set predict1_onestepiter;
+					L_0 = predicted_Load;
+					drop predicted_Load __FLAG;
+					run; 
+
+					*train2 is the working DS, append to there (closed loop) i.e. look there for predicteds theyll be obs > amper train2_limit_Nminus48; 
+					%put APPENDINGggggggggggg; 
+					proc append base=train2 data=predict1_onestepiter; run; quit;
+
+
+			%end;
+
+			*Calculate and save RESULTS;
+			data train3;
+			set train2;
+			if _n_ > &train2_limit_Nminus48 then output;
+			run;
+
+			*getting accuracy measures, namely RMSE, with SQL;
+			proc sql;
+			               create table working_holdact as
+						    select actual.*, forec.L_0 as predicted_Load label="Predicted Forecasts of &ForecastSeries."
+							  from hold1 as actual, train3 as forec
+							   where actual.datetime=forec.datetime  
+					;
+			  select sqrt(avg(se)) as rmse, sqrt(avg(sa)) as rmsa, avg(abs(L_0-predicted_Load)/L_0) as mape, (calculated rmse)/(calculated rmsa) as prmse_a
+			   from 
+				  (  select *, (L_0-predicted_Load)**2 as se, (L_0)**2 as sa
+					  from working_holdact
+				   )
+			  ;
+			quit;
+
+
+
+			*  GRAPHS ;
+			*all hist+forec;
+			title "Forecast Horizon, Actuals v. Forecasts, Also temperature.";
+			proc sgplot data=working_holdact;
+			series x=datetime y=L_0       / lineattrs=(thickness=1);
+			series x=datetime y=predicted_Load         / lineattrs=(thickness=1);
+			series x=datetime y=T1_0 / lineattrs=(thickness=1 color=yellow) y2axis;
+			run; quit;
+			title;
+
+			data work.Iteration&IterationLoop.Copy;
+			set train2;
+			run;
+
+
+%end; *iterate=ampIterations;
 
 %mend module1_build;
 
 
 
-*as for passing from Mod1 to Mod2 a model when 48 were built, could keep each of the 48 and put the step # under a var CALLED _Imputation_ and use MIANALYZE;
 
-/****************************************************  Module 2 -  Forecasting  Macro ****************************************************/
+
+
+
+ 
+ *as for passing from Mod1 to Mod2 a model when 48 were built, could keep each of the 48 and put the step # under a var CALLED _Imputation_ and use MIANALYZE;
+ 
+ /****************************************************  Module 2 -  Forecasting  Macro ****************************************************/
+ /*****************************************************************************************************************************************/
+ /******************************  Requires truly future covariate data and corresponding missing values for  ******************************/
+ /******************************   the VoI where it is to be forecast.  Can of course take a model from Mod1 ******************************/
+ /*****************************************************************************************************************************************/
+ 
+ 
+ /*
+ 							
+ DATA Diagram:
+ 
+ &DateVariable	&ForecastSeries	&PredictedTemperature	&RoleVariable
+ 02Aug2013:01:00	191177			71						train
+ 02Aug2013:02:00	198891			65						train	
+ ...
+ 02Aug2018:01:00	191177			71						train
+ 02Aug2018:02:00	198891			65						train
+ 02Aug2018:03:00	180113			64						train
+ 02Aug2018:04:00	179922			63						train
+ 02Aug2018:05:00	175044			63						train
+ 02Aug2018:06:00	191177			62						train
+ 02Aug2018:07:00	191177			68						train
+ 02Aug2018:09:00	191177			70						train
+ 02Aug2018:10:00	191177			70						train
+ 02Aug2018:11:00	191177			71						train
+ 02Aug2018:12:00	191177			70						train
+ 02Aug2018:13:00	.				73.1					final
+ 02Aug2018:14:00	.				69.0					final
+ 02Aug2018:15:00	.				71.6					final
+ 02Aug2018:16:00	.				71.2					final
+ 02Aug2018:17:00	.				72.9					final
+ 02Aug2018:18:00	.				71.8					final
+ 02Aug2018:19:00	.				75.5					final
+ 
+ Description: final refers to the final range of observations for which forecasts will be returned, to differentiate from the holdout process that is built into this
+ module.  The only missing values in the input dataset after preprocessing should be found in &ForecastSeries during this FINAL period.  For clarity, missing values should
+ occur exactly from &ForecastStartDatetime to &ForecastEndDatetime inclusive (the FINAL period) for exactly one column, &ForecastSeries.  In the future this module will
+ allow the option to expand/smooth &ForecastSeries and to forecast temperature itself.  
+ */
+ 
+ 
+ %macro module2_forec(       InputDataset           =, 
+ 							ForecastSeries         =,
+ 							DateVariable           =,
+ 							ForecastStartDatetime  =,
+ 							ForecastEndDatetime    =,
+ 							PredictedTemperature   =,
+ 							HistoricalObservations =,
+ 							ProblemSpeed           =3600,
+ 							RoleVariable           =role,
+ 
+ 							/* hidden for dev */
+ 							h=HOURofDay, d=DAYofWeek, m=MONTHofYear);
+ 
+ 
+ /*MACRO HOUSEKEEPING*/
+ %local indata; *  fcststart ;
+ title;
+ 
+ /* ROBUSTNESS */
+ /* trace back what is the first missing value in any series, compare to ForecastStartDatetime
+    other more simple checks, start<end, etc */
+ 
+ 
+ %mend module2_forec;
+
+
+/************************************************ Module 3 - Architecture Building Macro *************************************************/
 /*****************************************************************************************************************************************/
-/******************************  Requires truly future covariate data and corresponding missing values for  ******************************/
-/******************************   the VoI where it is to be forecast.  Can of course take a model from Mod1 ******************************/
+/******************************  Creates an architecture dataset for use by MODULE ONE.  Default is one     ******************************/
+/******************************   iteration of 48 obs (corr to 48 hours?, to end of data availability.      ******************************/
 /*****************************************************************************************************************************************/
+%macro module3_arch(iter=1,InputDataset=);
+ *The macro variable iter is the number of 48-hour periods to run ex ante DynReg for;
 
-
-/*
-							
-DATA Diagram:
-
-&DateVariable	&ForecastSeries	&PredictedTemperature	&RoleVariable
-02Aug2013:01:00	191177			71						train
-02Aug2013:02:00	198891			65						train	
-...
-02Aug2018:01:00	191177			71						train
-02Aug2018:02:00	198891			65						train
-02Aug2018:03:00	180113			64						train
-02Aug2018:04:00	179922			63						train
-02Aug2018:05:00	175044			63						train
-02Aug2018:06:00	191177			62						train
-02Aug2018:07:00	191177			68						train
-02Aug2018:09:00	191177			70						train
-02Aug2018:10:00	191177			70						train
-02Aug2018:11:00	191177			71						train
-02Aug2018:12:00	191177			70						train
-02Aug2018:13:00	.				73.1					final
-02Aug2018:14:00	.				69.0					final
-02Aug2018:15:00	.				71.6					final
-02Aug2018:16:00	.				71.2					final
-02Aug2018:17:00	.				72.9					final
-02Aug2018:18:00	.				71.8					final
-02Aug2018:19:00	.				75.5					final
-
-Description: final refers to the final range of observations for which forecasts will be returned, to differentiate from the holdout process that is built into this
-module.  The only missing values in the input dataset after preprocessing should be found in &ForecastSeries during this FINAL period.  For clarity, missing values should
-occur exactly from &ForecastStartDatetime to &ForecastEndDatetime inclusive (the FINAL period) for exactly one column, &ForecastSeries.  In the future this module will
-allow the option to expand/smooth &ForecastSeries and to forecast temperature itself.  
-*/
-
-
-%macro module2_forec(       InputDataset           =, 
-							ForecastSeries         =,
-							DateVariable           =,
-							ForecastStartDatetime  =,
-							ForecastEndDatetime    =,
-							PredictedTemperature   =,
-							HistoricalObservations =,
-							ProblemSpeed           =3600,
-							RoleVariable           =role,
-
-							/* hidden for dev */
-							h=HOURofDay, d=DAYofWeek, m=MONTHofYear);
-
-
-/*MACRO HOUSEKEEPING*/
-%local indata; *  fcststart ;
-title;
-
-/* ROBUSTNESS */
-/* trace back what is the first missing value in any series, compare to ForecastStartDatetime
-   other more simple checks, start<end, etc */
-
-
-%mend module2_forec;
-
-
-
-
-
+*count observations in the input dataset;
+ %local inputnumobs;
+proc sql; 
+select count(*) 
+ into : inputnumobs 
+ from &InputDataset; 
+quit;
+*Currently the architecture dataset specifies essentially only the "ForecastWindow" which is the number
+ of observations in each run of the system (e.g. 48 for day-ahead ELF) and the number of times to do so
+ (e.g. 48 by 3 will go back a total of 144 observations and give 3 sets of 48-obs forecasts, with accuracy and graphs)
+ Currently it is assumed that no overlap or chunking is done, and that in the end all data will get used (i.e. the last run
+ will get the last data point).  Other forms of input are planned but not yet implemented.;
+data architect;
+ForecastWindow=48;
+From=&inputnumobs- (48 * &iter.);
+To=&inputnumobs;  *currently To always the end of the data, no need to spend time on this now;
+Iterations=&iter.;
+run;
+%mend module3_arch;
 
 
 
 /****************************************************        Examples        ****************************************************/
 /*****************************************************************************************************************************************/
-/******************************                    Not yet tested  ******************************/
-/******************************    due to time constraints ******************************/
 /*****************************************************************************************************************************************/
+%let ForecastSeries = lz1;
+libname g 'C:\Users\anhutz\Desktop\msa\TimeSeries\PROJECTS\GEFCom2012\data';
+proc expand data=g.gef out=gexpand; convert &ForecastSeries.; run; quit; 
 
+data gexpand;
+set gexpand(where=(&ForecastSeries.^=.));* to have nontriv (bc GEF has miss at end to forecast, Tao held true holdout) ;
+run;
+proc mi data=g.gef(where=(ts1^=.))  nimpute=0;
+  em out=gef_MI;
+  var lz1 lz2 avgtemp temprange monthofyear hourofday yearofdecade trend;
+run;
+proc sgplot data=work.gef_mi; 
+*where '01jul2005:00:00'dt<datetime<'01jul2006:00:00'dt;
+where '01dec2005:00:00'dt<datetime<'01jan2006:00:00'dt;
+series x=datetime y=lz1;
+series x=datetime y=lz3 / y2axis;
+run;
+proc print data=gef_mi; where lz1<=0; run;
+
+%module3_arch(iter=1,InputDataset=work.gef_MI);
+/* data gef_MI; set gef_mi; where trend<39025; run; */
+%module1_build(             InputDataset           =work.gef_MI, 
+							ForecastSeries         =lz2,
+							DateVariable           =datetime,
+							PredictedTemperature   =ts6,
+							ForecastArchitecture           =architect);
+						);
+
+
+/******************************     ******************************/
+/******************************     ******************************/
 data comed;
 infile "C:\Users\anhutz\Desktop\msa\msa_backup_NO Video\TS--16Sep2012\PROJECT\phase2\phase1.csv" dsd stopover firstobs=2;
 format date date9.;
@@ -433,38 +498,15 @@ HOURofDay=hour;
 role="train";
 trend+1;
 run;
+%module3_arch(iter=1,InputDataset=work.comed);
 
 %module1_build(             InputDataset           =work.comed, 
 							ForecastSeries         =load,
 							DateVariable           =datetime,
 							PredictedTemperature   =temp,
-							RoleVariable           =role);
+							ForecastArchitecture           =architect);
 
-%let ForecastSeries = lz1;
-libname g 'C:\Users\anhutz\Desktop\msa\TimeSeries\PROJECTS\GEFCom2012\data';
-proc expand data=g.gef out=gexpand; convert &ForecastSeries.; run; quit; 
 
-data gexpand;
-set gexpand(where=(&ForecastSeries.^=.));* to have nontriv (bc GEF has miss at end to forecast, Tao held true holdout) ;
-run;
-proc mi data=g.gef(where=(ts1^=.))  nimpute=0;
-  em out=gef_MI;
-  var lz1 lz2 avgtemp temprange monthofyear hourofday yearofdecade trend;
-run;
-proc sgplot data=work.gef_mi; 
-*where '01jul2005:00:00'dt<datetime<'01jul2006:00:00'dt;
-where '01dec2005:00:00'dt<datetime<'01jan2006:00:00'dt;
-series x=datetime y=lz1;
-series x=datetime y=lz3 / y2axis;
-run;
-proc print data=gef_mi; where lz1<=0; run;
-
-/* data gef_MI; set gef_mi; where trend<39025; run; */
-%module1_build(             InputDataset           =work.gef_MI, 
-							ForecastSeries         =lz2,
-							DateVariable           =datetime,
-							PredictedTemperature   =ts6
-						);
 
 
 
