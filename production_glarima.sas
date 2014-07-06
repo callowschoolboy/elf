@@ -296,6 +296,36 @@ title;
 			%end;
 
 			*Calculate and save RESULTS;
+			*seed a dataset to hold all of this runs information;
+			%local ResultsDataSet TimeSpace;* TimePart i TimeHMS;
+			%let TimeSpace = %sysfunc(translate(%sysfunc(time(),time8.),%str(:),%str( )));
+            %put TimeSpace=&TimeSpace. Havent been able to get time to work :( ;
+			%let ResultsDataSet=results_%sysfunc(date(),date9.);
+			data &ResultsDataSet;
+			attrib InDS     length=$50 format=$50.   label='Input Dataset';
+			attrib Series   length=$50 format=$50.   label='Forecast Series';
+			attrib Datevar  length=$50 format=$50.   label='Date Variable';
+			attrib Temperat length=$50 format=$50.   label='Predicted Temperature Variable';
+			attrib Arch     length=$50 format=$50.   label='Forecast Architecture DSN';
+			attrib h        length=$50 format=$50.   label='Variable for HOUR~of~Day';
+			attrib d        length=$50 format=$50.   label='Variable for DAY~of~Week';
+			attrib m        length=$50 format=$50.   label='Variable for MONTH~of~Year';
+			attrib Iter     length=$50 format=$50.   label='Iteration number';
+			attrib mape     length=8   format=8.     label='Mean Absolute Percentage Error';
+			attrib prmse_a  length=8   format=8.     label='RMSE divided by RMSActual';
+                            InDS           ="&InputDataset"; 
+							Series         ="&ForecastSeries";
+                            Datevar           ="&DateVariable";
+							Temperat   ="&PredictedTemperature";
+							Arch   ="&ForecastArchitecture";
+                            h="&h"; 
+							d="&d";
+                            m="&m";
+							Iter="&IterationLoop";
+							mape=.;
+							prmse_a=.;
+			run;
+
 			data train3;
 			set train2;
 			if _n_ > &train2_limit_Nminus48 then output;
@@ -308,6 +338,7 @@ title;
 							  from hold1 as actual, train3 as forec
 							   where actual.datetime=forec.datetime  
 					;
+				create table SingletonResult as
 			  select sqrt(avg(se)) as rmse, sqrt(avg(sa)) as rmsa, avg(abs(L_0-predicted_Load)/L_0) as mape, (calculated rmse)/(calculated rmsa) as prmse_a
 			   from 
 				  (  select *, (L_0-predicted_Load)**2 as se, (L_0)**2 as sa
@@ -315,6 +346,7 @@ title;
 				   )
 			  ;
 			quit;
+			proc append base=&ResultsDataSet data=SingletonResult force; run;
 
 
 
@@ -465,7 +497,7 @@ series x=datetime y=lz3 / y2axis;
 run;
 proc print data=gef_mi; where lz1<=0; run;
 
-%module3_arch(iter=1,InputDataset=work.gef_MI);
+%module3_arch(iter=2,InputDataset=work.gef_MI);
 /* data gef_MI; set gef_mi; where trend<39025; run; */
 %module1_build(             InputDataset           =work.gef_MI, 
 							ForecastSeries         =lz2,
@@ -473,41 +505,4 @@ proc print data=gef_mi; where lz1<=0; run;
 							PredictedTemperature   =ts6,
 							ForecastArchitecture           =architect);
 						);
-
-
-/******************************     ******************************/
-/******************************     ******************************/
-data comed;
-infile "C:\Users\anhutz\Desktop\msa\msa_backup_NO Video\TS--16Sep2012\PROJECT\phase2\phase1.csv" dsd stopover firstobs=2;
-format date date9.;
-input date :mmddyy. hour load temp;
-
-   *datetime "key";
-format datetime datetime.;
-datetime=dhms(date,hour,0,0);
-if (mday=31 and month=12 and 20<=hour<=24) or (mday=1 and month=1 and 1<=hour<=9 ) then new_year=1; else new_year=0;
-if (mday=31 and month=10 and 20<=hour<=24) or (mday=1 and month=11 and 1<=hour<=9 ) then halloween=1; else halloween=0;
-if (mday=25 and month=12) then christmas=1; else christmas=0;
-if (mday=24 and month=12) then xmaseve=1; else xmaseve=0;
-if (month=11 and weekday=5 and 21<mday<29) then thanks=1; else thanks=0;*4th Thursday of Nov?;
-if (month=11 and weekday=6 and 22<mday<30) then blackfri=1; else blackfri=0;
-if (month=7 and mday=4) then july4=1; else july4=0;
-MONTHofYear=month(date);
-DAYofWeek=weekday(date);
-HOURofDay=hour;
-role="train";
-trend+1;
-run;
-%module3_arch(iter=1,InputDataset=work.comed);
-
-%module1_build(             InputDataset           =work.comed, 
-							ForecastSeries         =load,
-							DateVariable           =datetime,
-							PredictedTemperature   =temp,
-							ForecastArchitecture           =architect);
-
-
-
-
-
 
