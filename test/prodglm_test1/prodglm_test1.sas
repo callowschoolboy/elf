@@ -53,17 +53,14 @@ run;
 %module3_arch(iter=3,InputDataset=work.comed);
 
 libname benches 'C:\Users\anhutz\Desktop\msa\msa_backup_NO Video\TS--16Sep2012\PROJECT\2013\test\prodglm_test1';
-proc compare data=benches.comed compare=comed criteria=1e-12 method=relative(1e-9);
+proc compare data=benches.comed compare=comed criteria=1e-12 method=relative(1e-9); run;
 %let catch_comed=&sysinfo;
 %put catch_comed=&catch_comed;
 
-proc compare data=benches.architect compare=architect;* criteria=1e-12 method=relative(1e-9);
+proc compare data=benches.architect compare=architect; run;
 %let catch_architect=&sysinfo;
 %put catch_architect=&catch_architect;
 
-data _null_;
-*check those;
-run;
 
 
 %module1_build(             InputDataset           =work.comed, 
@@ -72,6 +69,16 @@ run;
 							PredictedTemperature   =temp,
 							ForecastArchitecture           =architect);
 
-data _null_;
 *compare to working_holdact;
+proc compare data=benches.working_holdact compare=working_holdact criteria=1e-8;
+var predicted_load;
+run;
+%let catch_hold=&sysinfo;
+%put catch_hold=&catch_hold;
+
+data _null_;
+if catch_comed>64 or catch_architect>64 or catch_hold>64 then do;
+	put "At least one dataset does not match its bench.  FAILURE!";
+end;
+else put "Test PASSED.";
 run;
