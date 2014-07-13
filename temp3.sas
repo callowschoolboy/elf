@@ -83,8 +83,9 @@ options mprint mlogic nosymbolgen;
 /*
 
 GLM1: Tu's (optional 4 holidays) :
+	*Tu Nghiems original .2 model; 
 	PROC GLM DATA=getastep_prediction
-			PLOTS=NONE NOPRINT 
+			PLOTS=NONE NOPRINT /* heard NOPRINT can change answers, may move to ods close all ods select ~predict1_onestepiter */
 		;
 		CLASS &d. &h. &m.;
 		MODEL &ForecastSeries. =
@@ -92,8 +93,8 @@ GLM1: Tu's (optional 4 holidays) :
 					trend 
 					&m.
 					L_1
-					&PredictedTemperature. 
-		/* 2-way Interactions: */
+					/*PredictedTemperature NOT included as main effect*/
+		        /* 2-way Interactions: */
 					&d.*&h.
 				/* Temperature x hour */
 					&PredictedTemperature.*&h.
@@ -112,17 +113,21 @@ GLM1: Tu's (optional 4 holidays) :
 				/* Load interactions: */
 				    L_1*&h. 
 					L_1*&m. 
-
-               /* Holidays:
-					july4 
-					new_year 
-					thanks 
+				/* Holidays: */
+					july4   	
+					new_year
+					thanks
 					christmas
-					  */
 		;
 		RUN;
 
-GLM2 nonhierarchical three-ways for parsimony UNTESTED
+		OUTPUT OUT= predict1_onestepiter (WHERE=(NOT __FLAG))
+			PREDICTED=predicted_Load ;
+		RUN;
+	QUIT;
+
+
+*GLM2 nonhierarchical three-ways for parsimony UNTESTED
 	PROC GLM DATA=getastep_prediction
 			PLOTS=NONE NOPRINT 
 		;

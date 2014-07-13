@@ -249,7 +249,6 @@ title;
 									trend 
 									&m.
 									L_1
-				/*					L_2*/
 									T1_0 
 						/* 2-way Interactions: */
 									&d.*&h.
@@ -270,9 +269,6 @@ title;
 								/* Load interactions: */
 								    L_1*&h. 
 									L_1*&m. 
-
-				/*				    L_2*&h. */
-
 
 						;
 						RUN;
@@ -472,37 +468,4 @@ To=&inputnumobs;  *currently To always the end of the data, no need to spend tim
 Iterations=&iter.;
 run;
 %mend module3_arch;
-
-
-
-/****************************************************        Examples        ****************************************************/
-/*****************************************************************************************************************************************/
-/*****************************************************************************************************************************************/
-%let ForecastSeries = lz1;
-libname g 'C:\Users\anhutz\Desktop\msa\TimeSeries\PROJECTS\GEFCom2012\data';
-proc expand data=g.gef out=gexpand; convert &ForecastSeries.; run; quit; 
-
-data gexpand;
-set gexpand(where=(&ForecastSeries.^=.));* to have nontriv (bc GEF has miss at end to forecast, Tao held true holdout) ;
-run;
-proc mi data=g.gef(where=(ts1^=.))  nimpute=0;
-  em out=gef_MI;
-  var lz1 lz2 avgtemp temprange monthofyear hourofday yearofdecade trend;
-run;
-proc sgplot data=work.gef_mi; 
-*where '01jul2005:00:00'dt<datetime<'01jul2006:00:00'dt;
-where '01dec2005:00:00'dt<datetime<'01jan2006:00:00'dt;
-series x=datetime y=lz1;
-series x=datetime y=lz3 / y2axis;
-run;
-proc print data=gef_mi; where lz1<=0; run;
-
-%module3_arch(iter=2,InputDataset=work.gef_MI);
-/* data gef_MI; set gef_mi; where trend<39025; run; */
-%module1_build(             InputDataset           =work.gef_MI, 
-							ForecastSeries         =lz2,
-							DateVariable           =datetime,
-							PredictedTemperature   =ts6,
-							ForecastArchitecture           =architect);
-						);
 
