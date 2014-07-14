@@ -62,7 +62,6 @@ proc compare data=benches.architect compare=architect; run;
 %put catch_architect=&catch_architect;
 
 
-
 %module1_build(             InputDataset           =work.comed, 
 							ForecastSeries         =load,
 							DateVariable           =datetime,
@@ -77,8 +76,10 @@ run;
 %put catch_hold=&catch_hold;
 
 data _null_;
-if catch_comed>64 or catch_architect>64 or catch_hold>64 then do;
+if &catch_comed>64 or &catch_architect>64 or &catch_hold>64 then do;
 	put "At least one dataset does not match its bench.  FAILURE!";
 end;
 else put "Test PASSED.";
 run;
+
+*model=trend &h.*&m. &PredictedTemperature.*&h.*&d. T2_0*&h.*&d. T3_0*&h.*&d.;

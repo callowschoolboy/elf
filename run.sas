@@ -110,3 +110,76 @@ proc print data=gef_mi; where lz1<=0; run;
 							PredictedTemperature   =ts6,
 							ForecastArchitecture           =architect);
 						);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/****************************************************      Macro Variable Checking    ****************************************************/
+/*****************************************************************************************************************************************/
+/******************************  Three "simple" ways to check but none are working at present time.         ******************************/
+/******************************    Must simply supply nonmissing MODEL macro variable in correct form.      ******************************/
+/*****************************************************************************************************************************************/
+
+*THIS ONLY REPORTS HUMAN-READABLE, for macro processor to fork and such need numeric output;
+%macro NullSymbol(sym);
+ %if (not %symexist(sym) or "&sym"="") %then %do;
+	%put Symbol seems to be null;
+ %end;
+ %else %put "Symbol &sym resolves to &sym."; *a replacement for symbolgen so you can safely always have options nosymbolgen;
+%mend NullSymbol;
+
+
+
+options mprint mlogic symbolgen source notes;
+%macro module(       InputDataset           =, 
+							ForecastSeries         =,
+							DateVariable           =,
+							PredictedTemperature   =,
+							HistoricalObservations =,
+							ProblemSpeed           =3600,
+							ForecastArchitecture   =,
+							Model                  =,
+
+                            /* hidden for dev */
+                            h=HOURofDay, d=DAYofWeek, m=MONTHofYear);
+
+
+										*model and output the predictions; 
+data test1;
+length chardat $ 1000;
+num1=%sysevalf(%superq(&MODEL.)=,boolean);
+num2=not %symexist(&MODEL.) ;
+*num3="&&&MODEL."="";
+
+				
+		chardat = 
+                     %if %sysevalf(%superq(&MODEL.)=,boolean) or not %symexist(&MODEL.) or "&&&MODEL."="" %then
+"trend &m. L_1 T1_0 &d.*&h. T1_0*&h. T2_0*&h. T3_0*&h. T1_1*&h. T2_1*&h. T3_1*&h. T1_0*&m. T2_0*&m. T3_0*&m. T1_1*&m. T2_1*&m. T3_1*&m. L_1*&h. L_1*&m."
+                     ;
+
+                      /* Default model if no valid custom specified */
+
+					 %else
+ 					"	&MODEL."
+                   ;
+						;
+
+						RUN;
+%mend;
+
+%module();
+

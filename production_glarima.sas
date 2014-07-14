@@ -137,6 +137,7 @@ options mprint mlogic symbolgen source notes;
 							HistoricalObservations =,
 							ProblemSpeed           =3600,
 							ForecastArchitecture   =,
+							Model                  =trend &m. L_1 T1_0 &d.*&h. T1_0*&h. T2_0*&h. T3_0*&h. T1_1*&h. T2_1*&h. T3_1*&h. T1_0*&m. T2_0*&m. T3_0*&m. T1_1*&m. T2_1*&m. T3_1*&m. L_1*&h. L_1*&m.,
 
                             /* hidden for dev */
                             h=HOURofDay, d=DAYofWeek, m=MONTHofYear);
@@ -245,30 +246,10 @@ title;
 						;
 						CLASS &d. &h. &m.;
 						MODEL L_0 =
-						/* Main Effects:  */ 
-									trend 
-									&m.
-									L_1
-									T1_0 
-						/* 2-way Interactions: */
-									&d.*&h.
-								/* Temperature x hour */
-									T1_0*&h.
-									T2_0*&h. 
-									T3_0*&h. 
-									T1_1*&h. 
-									T2_1*&h. 
-									T3_1*&h. 
-								/* Temperature x month */
-									T1_0*&m.
-									T2_0*&m. 
-									T3_0*&m. 
-									T1_1*&m. 
-									T2_1*&m.	 
-									T3_1*&m. 
-								/* Load interactions: */
-								    L_1*&h. 
-									L_1*&m. 
+
+                      /* Custom model can be specified as a macro variable, space delimited list */
+                           
+						&MODEL.
 
 						;
 						RUN;
@@ -277,6 +258,14 @@ title;
 							PREDICTED=predicted_Load ;
 						RUN;
 					QUIT;
+
+
+/*       ESM could be added, brings 2 parms with it.  temp3 is working but poor results ESP. MISSING FORECASTS
+					PROC ESM data=train1 print=none plot=none lead=1 out=train1;
+						id &DateVariable. interval=hour;
+						forecast &ForecastSeries. / model=&ESM_model. transform=&ESM_transform.;
+					RUN; 
+				    QUIT;  */
 
 					data predict1_onestepiter; * in place, shift that variable predicted_Load over to the target &ForecastSeries. (its all in the names, at this point in the flow L_0);
 					set predict1_onestepiter;
