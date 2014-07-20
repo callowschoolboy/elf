@@ -66,8 +66,33 @@ proc compare data=benches.architect compare=architect; run;
 							ForecastSeries         =load,
 							DateVariable           =datetime,
 							PredictedTemperature   =temp,
+                            Model=
+							 /* Main Effects:  */    
+                                  trend 
+                                  &m. 
+                                  L_1 
+                                  T1_0 
+							 /* 2-way Interactions: */
+                                  &d.*&h. 
+							   /* Temperature x hour */
+                                  T1_0*&h. 
+                                  T2_0*&h. 
+                                  T3_0*&h. 
+                                  T1_1*&h. 
+                                  T2_1*&h. 
+                                  T3_1*&h. 
+							   /* Temperature x month */
+                                  T1_0*&m. 
+                                  T2_0*&m. 
+                                  T3_0*&m. 
+                                  T1_1*&m. 
+                                  T2_1*&m. 
+                                  T3_1*&m. 
+							   /* Load interactions: */
+                                  L_1*&h. 
+                                  L_1*&m.
+                            ,
 							ForecastArchitecture           =architect);
-
 *compare to working_holdact;
 proc compare data=benches.working_holdact compare=working_holdact criteria=1e-8;
 var predicted_load;
@@ -82,6 +107,4 @@ end;
 else put "Test PASSED.";
 run;
 
-*model=trend &h.*&m. &PredictedTemperature.*&h.*&d. T2_0*&h.*&d. T3_0*&h.*&d.;  *Default below next;
-*Model=trend &m. L_1 T1_0 &d.*&h. T1_0*&h. T2_0*&h. T3_0*&h. T1_1*&h. T2_1*&h. T3_1*&h. T1_0*&m. T2_0*&m. T3_0*&m. T1_1*&m. T2_1*&m. T3_1*&m. L_1*&h. L_1*&m.,
-;
+*model=trend &h.*&m. &PredictedTemperature.*&h.*&d. T2_0*&h.*&d. T3_0*&h.*&d.;

@@ -80,15 +80,11 @@ options mprint mlogic nosymbolgen;
 
 
 
-/*
 
-GLM1: Tu's (optional 4 holidays) :
-	*Tu Nghiems original .2 model; 
-	PROC GLM DATA=getastep_prediction
-			PLOTS=NONE NOPRINT /* heard NOPRINT can change answers, may move to ods close all ods select ~predict1_onestepiter */
-		;
-		CLASS &d. &h. &m.;
-		MODEL &ForecastSeries. =
+*GLM1: Tu's (optional 4 holidays) :
+	*Tu Nghiems original .2 model 
+
+
 		/* Main Effects:  */ 
 					trend 
 					&m.
@@ -118,21 +114,13 @@ GLM1: Tu's (optional 4 holidays) :
 					new_year
 					thanks
 					christmas
-		;
-		RUN;
+             ,
 
-		OUTPUT OUT= predict1_onestepiter (WHERE=(NOT __FLAG))
-			PREDICTED=predicted_Load ;
-		RUN;
-	QUIT;
-
-
+;
 *GLM2 nonhierarchical three-ways for parsimony UNTESTED
-	PROC GLM DATA=getastep_prediction
-			PLOTS=NONE NOPRINT 
-		;
-		CLASS &d. &h. &m.;
-		MODEL &ForecastSeries. =
+
+
+
 		/* Main Effects:  */ 
 					trend 
 
@@ -150,5 +138,33 @@ GLM1: Tu's (optional 4 holidays) :
 					T3_1*&h.*&d. 
 				/* Load interaction: */
 				    L_1*&h.*&m. 
-		;
-		RUN;
+,
+
+;
+*NO load
+							 /* Main Effects:  */    
+                                  trend 
+                                  &m. 
+                                    
+                                  T1_0 
+							 /* 2-way Interactions: */
+                                  &d.*&h. 
+							   /* Temperature x hour */
+                                  T1_0*&h. 
+                                  T2_0*&h. 
+                                  T3_0*&h. 
+                                  T1_1*&h. 
+                                  T2_1*&h. 
+                                  T3_1*&h. 
+							   /* Temperature x month */
+                                  T1_0*&m. 
+                                  T2_0*&m. 
+                                  T3_0*&m. 
+                                  T1_1*&m. 
+                                  T2_1*&m. 
+                                  T3_1*&m. 
+							   /* NO Load! */
+                                    
+                                   
+                            ,
+;
