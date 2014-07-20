@@ -28,62 +28,62 @@
 *************************************************************************************************************************************************************************/
 
 
-
-*CURRENT PLAN IS TO HAVE SEVERAL VERY SIMILAR MACROS FOR DIFFERENT DATA CASES, WHICH SHOULD CORRESPOND TO DIFF APPROACHES.  MAY INTEGRATE DATA MANIP INTO MACROS RATHER THAN PREPROC;
+*CURRENT PLAN IS TO HAVE SEVERAL VERY SIMILAR MACROS FOR DIFFERENT DATA CASES,   ).
+ MAY INTEGRATE DATA MANIP INTO MACROS RATHER THAN PREPROC;
 
 *Data Requirements:
 One main dataset, such as GEF, which may have more than one load series to forecast and has at least one corresponding temperature series (called &PredictedTemperature)
-This dataset must also have at least one corresponding role variable which tells, for the load series to be forecasted, which obs are training and which are test.
 Module 1 (Model-building macro) requires totally full data, no missing at all.
-Module 2 (Forecasting macro) assumes that you have supplied future values of covariate and therefore missing for the VoI values that you intend to forecast (see datdiag below).
-
+Module 2 (Forecasting macro, applies a model ex ante) assumes that you have supplied future values of covariate and therefore missing for the VoI values that you intend to forecast (see datdiag below).
+ (alternatively Mod2 could forecast covariates, that is taking on risk and responsibility)
 
 External Variables:
-InputDataset           - 
-ForecastSeries         - 
-ForecastStartDatetime  - 
-ForecastEndDatetime    - 
+InputDataset           - The main input dataset (e.g. GEF) having at least one ForecastSeries and at least one corresponding PredictedTemperature.
+ForecastSeries         - Identifies which variable in &InputDataset is the VoI, the way user chooses which series to forecast (like GEF think series=col=var).
+DateVariable           - A variable giving the date (or datetime) for an observation.  For my purposes this is usually the primary key of the data.  
 PredictedTemperature   - 
+ForecastArchitecture   =,
+Model                  =trend &m. L_1 T1_0 &d.*&h. T1_0*&h. T2_0*&h. T3_0*&h. T1_1*&h. T2_1*&h. T3_1*&h. T1_0*&m. T2_0*&m. T3_0*&m. T1_1*&m. T2_1*&m. T3_1*&m. L_1*&h. L_1*&m.,
+
+----- Not Yet Implemented -----
+ForecastStart          - Implemented in &Architecture but not yet meaningful, Module 3 uses it as a marker of &inputnumobs- (48 * &iter.)
+ForecastEnd            - Implemented in &Architecture but not yet meaningful, Module 3 always sets it to the last observation number in InputDataset
 RoleVariable           - the variable in &InputDataset with values "train" and "test" which tells the Role 
                          of &ForecastSeries (often one rolevar shared over many series)
 HistoricalObservations - if ommitted i.e. null will default to whole history
+ProblemSpeed           -
 
 
 Internal:
-IntermRole - an intermediate ~copy of role that rolls as you step ahead, to keep track of how to slice each time. will be dropped off of &InputDataset
 T - temperature, not time or trend.  "temp" discouraged, ambiguous with temporary.  A number imm next to it is power, after an underscore is lag, i.e. Tx_y is T^x(t-y)
-
+h - HOURofDay
+d - DAYofWeek
+m - MONTHofYear
 
 
 *---------------------------*
 
 
-Major Assumption: since this is hourly in an industry that buys weather forecasts and initially had at most 2 lags hardcoded, module 1 was originally written to
-use actual temperature.  In practice this meant pointing &PredictedTemperature to a variable that contains Actual Temperature values.  All of my datasets have 
-historical temperature for the training AND test periods and do NOT have temperature forecast data saved.  But &PredictedTemperature can be pointed to any 
-variable, such as one for which temperature forecast data is available in the input dataset (see Data Diagrams) although a new module (#2) is being started
-to be oriented towards this behavior, i.e. full data as just described goes to mod 1 and for forecasted temperature use mod 2.
+Note Bene: Module 1 still takes &PredictedTemperature blindly, it does not forecast temperature in the rolling holdout periods for you.  So if &PredictedTemperature is
+a variable that contains Actual Temperature values (and all of my datasets have historical observed for the training AND test periods, lacking ANY temperature 
+FORECASTS) then accuracy will be INFLATED, using perfect information for temperature in this ex post module.  But &PredictedTemperature can be pointed to any 
+variable, so options are to use that fact internally in the flow to forecast temp for the holdout periods or to pass a dataset with, say, the last year having
+temperature forecasts to get a better sense during model building.
 
 NamingConvention: CamelCase NO Abbreviation
-NOTE: general step-ahead not day-ahead (code is speed-agnostic but model isnt! but simply postproc i.e. chop last 24 forecasts as day-ahead), role variable 
-       is sticky data but may or may not be better than number-logic for slicing obs
-
+NOTE: general step-ahead not day-ahead (code is speed-agnostic but model isnt! ), role variable is heavily deprecated at present time.
 
 
 *---------------------------*
 
 
-
-NOT yet implemented:
-RoleVariable
-Start and End dates
-ProblemSpeed
+IMP but NOT yet implemented:
 non-triv-Season and events
 currently no nuance to season such as heliocentricity or defining season in another table, strictly season=month
-No events yet, they will be in a seperate table??
+No events yet, will they be in a seperate table??
 FUTURE will specify model structure, now hardcoded one model "size" i.e. 2 lags of load 2 lags of temp all interacting
  -when open it up to any number of lags of these must generalize the ex-ante'ing and will no longer be able to assume &PredictedTemperature=historical (i.e. ex-post)
-
+   --currently can do any model specification combo of L_0 L_1 and L_2 safely but not past that...
 
 ;
 
@@ -123,11 +123,11 @@ FUTURE will specify model structure, now hardcoded one model "size" i.e. 2 lags 
 %mend lst; 
 
 
-/**************************************************** Module 1 - Model Building Macro ****************************************************/
-/*****************************************************************************************************************************************/
-/******************************  This slicing logic assumes full data, so that future values of covariate   ******************************/
-/******************************   (whether forecasted or actual) are available 48 obs ahead, gives accuracy ******************************/
-/*****************************************************************************************************************************************/
+/***************************************************** Module 1 - Model Building Macro *****************************************************/
+/*******************************************************************************************************************************************/
+/******************************  This slicing logic assumes full data, so that future values of covariate(s)  ******************************/
+/******************************   (whether forecasted or actual) are available 48 obs ahead. Reports accuracy ******************************/
+/*******************************************************************************************************************************************/
 
 options mprint mlogic symbolgen source notes;
 %macro module1_build(       InputDataset           =, 
@@ -206,10 +206,9 @@ title;
 
 			*CHECK FOR INFORMATION LEAKS 
 			1. when append should mean next iter gets predictions as inputs 
-			2.at beginning have to RECALC LAGS on the working copy so that pred-as-ins occurs (TU SEEMS TO HAVE DONE THIS)
+			2.at beginning have to RECALC LAGS on the working copy so that pred-as-ins occurs (TU DID THIS)
 			can always rewrite this for contrived no-leak possible case then reintegrate that code.  But have checked, confident no info leaks here
-
-			3. THERE **IS** AN INFO LEAK FOR TEMPERATURE SINCE NO FOREC OF IT IS TAKEN FROM PROC ARIMA;
+			3. THERE **IS** AN INFO LEAK FOR TEMPERATURE SINCE NO FOREC RATHER ACTUAL;
 
 			%do i= 1 %to &ForecastWindow. %by 1; 
 

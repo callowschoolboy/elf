@@ -82,4 +82,6 @@ end;
 else put "Test PASSED.";
 run;
 
-*model=trend &h.*&m. &PredictedTemperature.*&h.*&d. T2_0*&h.*&d. T3_0*&h.*&d.;
+*model=trend &h.*&m. &PredictedTemperature.*&h.*&d. T2_0*&h.*&d. T3_0*&h.*&d.;  *Default below next;
+*Model=trend &m. L_1 T1_0 &d.*&h. T1_0*&h. T2_0*&h. T3_0*&h. T1_1*&h. T2_1*&h. T3_1*&h. T1_0*&m. T2_0*&m. T3_0*&m. T1_1*&m. T2_1*&m. T3_1*&m. L_1*&h. L_1*&m.,
+;
