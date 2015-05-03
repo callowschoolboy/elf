@@ -27,7 +27,7 @@
 /***************************************************** Module 1 - Model Building Macro *****************************************************/
 /*******************************************************************************************************************************************/
 /******************************  This slicing logic assumes full data, so that future values of covariate(s)  ******************************/
-/******************************   (whether forecasted or actual) are available 24 obs ahead. Reports accuracy ******************************/
+/******************************   (whether forecasted or actual) are available Window obs ahead.              ******************************/
 /*******************************************************************************************************************************************/
 
 options mprint mlogic symbolgen source notes;
@@ -36,7 +36,6 @@ options mprint mlogic symbolgen source notes;
 							DateVariable           =,
 							PredictedTemperature   =,
 							HistoricalObservations =,
-							ProblemSpeed           =24,
 							ForecastArchitecture   =,
 							Model                  =trend &m. L_1 T1_0 &d.*&h. T1_0*&h. T2_0*&h. T3_0*&h. T1_1*&h. T2_1*&h. T3_1*&h. T1_0*&m. T2_0*&m. T3_0*&m. T1_1*&m. T2_1*&m. T3_1*&m. L_1*&h. L_1*&m.,
 
@@ -74,14 +73,14 @@ run;
 			 from &indata; 
 			quit;
 
-			*knock back 24 obs;
-			%let train2_limit_Nminus24=%eval(&inputnumobs - (&IterationLoop * &ForecastWindow.));
-			%put train2_limit_Nminus24=&train2_limit_Nminus24;
+			*knock back Window-many obs;
+			%let train2_limit_NminusW=%eval(&inputnumobs - (&IterationLoop * &ForecastWindow.));
+			%put train2_limit_NminusW=&train2_limit_NminusW;
 
 			*forking train/hold, train2 will become the main working dataset;
 			data train2 hold1; 
 			set &indata; 
-			if _n_ <= &train2_limit_Nminus24 then output train2; 
+			if _n_ <= &train2_limit_NminusW then output train2; 
 			else output hold1; 
 			run;
 
@@ -89,7 +88,7 @@ run;
 
 					*Use a macro variable to point to the obsnum that is the next in line to be forecasted;
 				    **In a multilag GLM this is the start of the "ex ante gray period longjump"; 
-					%let iteration_obs=%eval(&train2_limit_Nminus24 + &i); 
+					%let iteration_obs=%eval(&train2_limit_NminusW + &i); 
 					%put iteration_obs=&iteration_obs;
 
 					data hold2_single;
@@ -129,7 +128,7 @@ run;
 					drop predicted_Load __FLAG;
 					run; 
 
-					*train2 is the working DS, append to there (closed loop) i.e. look there for predicteds theyll be obs > amper train2_limit_Nminus24; 
+					*train2 is the working DS, append to there (closed loop) i.e. look there for predicteds theyll be obs > amper train2_limit_NminusW; 
 					%put APPENDINGggggggggggg; 
 					proc append base=train2 data=predict1_onestepiter; run; quit;
 
@@ -137,18 +136,9 @@ run;
 
 			data train3;
 			set train2;
-			if _n_ > &train2_limit_Nminus24 then output;
+			if _n_ > &train2_limit_NminusW then output;
 			run;
 
-
-
-%end; *iterate=ampIterations;
-
-%mend module1_build;
-
-
- /****************************************************  Module No ****************************************************
- 
 			*getting accuracy measures, namely RMSE, with SQL;
 			proc sql;
 			               create table working_holdact as
@@ -165,17 +155,21 @@ run;
 			  ;
 			quit;
 
- */
+%end; *iterate=ampIterations;
+
+%mend module1_build;
+
+
  
  
 
 /************************************************ Module 3 - Architecture Building Macro *************************************************/
 /*****************************************************************************************************************************************/
 /******************************  Creates an architecture dataset for use by MODULE ONE.  Default is one     ******************************/
-/******************************   iteration of 24 obs (corr to 24 hours?, to end of data availability.      ******************************/
+/******************************   iteration of 48 obs, to end of data availability.      ******************************/
 /*****************************************************************************************************************************************/
-%macro module3_arch(iter=1,InputDataset=);
- *The macro variable iter is the number of 24-hour periods to run ex ante DynReg for;
+%macro module3_arch(iter=1,ForeWindow=48,InputDataset=);
+ *The macro variable iter is the number of Window-obs PERIODs to run ex ante DynReg for;
 
 *count observations in the input dataset;
  %local inputnumobs;
@@ -185,13 +179,13 @@ select count(*)
  from &InputDataset; 
 quit;
 *Currently the architecture dataset specifies essentially only the "ForecastWindow" which is the number
- of observations in each run of the system (e.g. 24 for day-ahead ELF) and the number of times to do so
+ of observations in each run of the system (e.g. 48 for day-ahead ELF) and the number of times to do so
  (e.g. 24 by 3 will go back a total of 144 observations and give 3 sets of 24-obs forecasts, with accuracy and graphs)
  Currently it is assumed that no overlap or chunking is done, and that in the end all data will get used (i.e. the last run
  will get the last data point).  Other forms of input are planned but not yet implemented.;
 data architect;
-ForecastWindow=24;
-From=&inputnumobs- (24 * &iter.);
+ForecastWindow=&ForeWindow.;
+From=&inputnumobs- ( (.5*&ForeWindow./*e.g. .5*48=24*/) * &iter.);
 To=&inputnumobs;  *currently To always the end of the data, no need to spend time on this now;
 Iterations=&iter.;
 run;
